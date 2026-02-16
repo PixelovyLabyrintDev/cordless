@@ -65,3 +65,11 @@ npm run dev
 
 Because auth/session logic is custom, all database writes happen server-side using `SUPABASE_SERVICE_ROLE_KEY`.
 Do not expose service role keys to the browser.
+
+## Troubleshooting
+
+- **"Failed to create account" (500)** usually means one of these:
+  1. `SUPABASE_SERVICE_ROLE_KEY` is missing or incorrect.
+  2. You have not executed `supabase/schema.sql` (missing `app_users`/`app_sessions`).
+
+Check your `.env.local`, restart the dev server, and rerun the schema SQL.

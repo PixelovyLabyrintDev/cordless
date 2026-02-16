@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
-import { admin, createSession, hashPassword } from "@/lib/server-auth";
+import { admin, createSession, hashPassword, serverAuthConfigError } from "@/lib/server-auth";
 
 export async function POST(request: Request) {
+  if (serverAuthConfigError) {
+    return NextResponse.json({ error: serverAuthConfigError }, { status: 500 });
+  }
+
   const { username, password } = await request.json();
 
   const normalizedUsername = String(username ?? "").trim().toLowerCase();
@@ -14,11 +18,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data: existing } = await admin
+  const { data: existing, error: existingError } = await admin
     .from("app_users")
     .select("id")
     .eq("username", normalizedUsername)
     .maybeSingle();
+
+  if (existingError) {
+    console.error("Signup lookup failed", existingError);
+    return NextResponse.json(
+      {
+        error:
+          "Database check failed. Ensure supabase/schema.sql has been executed (app_users table must exist)."
+      },
+      { status: 500 }
+    );
+  }
 
   if (existing) {
     return NextResponse.json({ error: "Username already exists." }, { status: 409 });
@@ -32,9 +47,31 @@ export async function POST(request: Request) {
     .single();
 
   if (error || !user) {
-    return NextResponse.json({ error: "Failed to create account." }, { status: 500 });
+    console.error("Signup insert failed", error);
+
+    if (error?.code === "23505") {
+      return NextResponse.json({ error: "Username already exists." }, { status: 409 });
+    }
+
+    const message = error?.message?.includes('relation "public.app_users" does not exist')
+      ? "Database table app_users is missing. Run supabase/schema.sql in your Supabase SQL editor."
+      : `Failed to create account: ${error?.message ?? "unknown database error"}`;
+
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  await createSession(user.id);
+  try {
+    await createSession(user.id);
+  } catch (sessionError) {
+    console.error("Session creation failed", sessionError);
+    return NextResponse.json(
+      {
+        error:
+          "Account created, but session failed. Check app_sessions table and SUPABASE_SERVICE_ROLE_KEY configuration."
+      },
+      { status: 500 }
+    );
+  }
+
   return NextResponse.json({ user });
 }

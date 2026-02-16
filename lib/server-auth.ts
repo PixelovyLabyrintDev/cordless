@@ -2,14 +2,18 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
-if (!supabaseUrl || !serviceRoleKey) {
-  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-}
+export const serverAuthConfigError =
+  !supabaseUrl || !serviceRoleKey
+    ? "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment."
+    : null;
 
-export const admin = createClient(supabaseUrl, serviceRoleKey, {
+export const admin = createClient(
+  supabaseUrl || "http://127.0.0.1:54321",
+  serviceRoleKey || "invalid-service-role-key",
+  {
   auth: { persistSession: false }
 });
 
@@ -34,6 +38,7 @@ function sha256(input: string): string {
 }
 
 export async function createSession(userId: string) {
+  if (serverAuthConfigError) throw new Error(serverAuthConfigError);
   const token = randomBytes(32).toString("hex");
   const tokenHash = sha256(token);
 
@@ -49,6 +54,7 @@ export async function createSession(userId: string) {
 }
 
 export async function clearSession() {
+  if (serverAuthConfigError) return;
   const token = cookies().get(SESSION_COOKIE)?.value;
   if (token) {
     await admin.from("app_sessions").delete().eq("token_hash", sha256(token));
@@ -58,6 +64,7 @@ export async function clearSession() {
 }
 
 export async function getSessionUser() {
+  if (serverAuthConfigError) return null;
   const token = cookies().get(SESSION_COOKIE)?.value;
   if (!token) return null;
 

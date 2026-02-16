@@ -94,23 +94,28 @@ export default function HomePage() {
     }
 
     const endpoint = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password })
-    });
 
-    const data = await response.json();
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
 
-    if (!response.ok) {
-      setStatus(data.error ?? "Authentication failed.");
-      return;
+      const data = (await response.json().catch(() => ({}))) as { error?: string; user?: Me };
+
+      if (!response.ok) {
+        setStatus(data.error ?? `Authentication failed (${response.status}).`);
+        return;
+      }
+
+      setMe(data.user ?? null);
+      setStatus(authMode === "signup" ? "Account created." : "Logged in.");
+      setPasswordInput("");
+      await refreshDashboard();
+    } catch {
+      setStatus("Could not reach auth server. Please try again.");
     }
-
-    setMe(data.user);
-    setStatus(authMode === "signup" ? "Account created." : "Logged in.");
-    setPasswordInput("");
-    await refreshDashboard();
   };
 
   const sendFriendRequest = async (e: FormEvent) => {
