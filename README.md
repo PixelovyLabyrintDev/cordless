@@ -1,0 +1,2 @@
+# cordless
+Discord alternative
