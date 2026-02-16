@@ -1,37 +1,26 @@
 # Cordless
 
 Cordless is a Discord-style MVP focused on:
-- account auth (username + password)
+- username + password registration/login
 - adding people as friends
-- realtime friend request notifications
+- live friend request notifications
 - fast deployment to Vercel
-- Supabase as the backend (Auth + Postgres + Realtime)
+- Supabase Postgres as backend
 
-## Why this architecture?
+## Architecture
 
-Instead of running a custom websocket server (hard on serverless platforms), this setup uses:
-1. **Supabase Auth** for user identity and password handling
-2. **Supabase Postgres** for durable social graph data
-3. **Supabase Realtime** for friend request notifications
-4. **Vercel** to host the Next.js app
+This version uses **custom app auth** stored in Postgres:
+1. Next.js Route Handlers for auth + friend APIs
+2. Supabase Postgres tables (`app_users`, `app_sessions`, `friend_requests`)
+3. HttpOnly cookie sessions
+4. Client polling every few seconds for request notifications
 
-This is the easiest path to production with the tooling you already have.
+This keeps the UX exactly username/password (no synthetic email aliasing).
 
 ## Vercel + Supabase networking (IPv4 question)
 
-Short answer: **yes, if you need a Postgres connection from Vercel, use Supabase's pooler connection string**.
-
-- For this current MVP, the app talks to Supabase via `@supabase/supabase-js` (HTTP/WebSocket APIs), so you usually do **not** need a raw Postgres connection from Vercel.
-- If you later add a server-side DB client (Prisma, Drizzle, `pg`, migrations, cron jobs), use Supabase's **Supavisor pooler** connection strings from the project dashboard.
-
-### Which pooler mode should I use?
-
-- **Transaction pooler**: best default for serverless runtime queries (many short-lived requests).
-- **Session pooler**: use when your library/tool needs session-level behavior (some ORMs or long-lived operations).
-
-A practical setup is:
-- runtime app queries on Vercel → **pooler URL**
-- migrations/admin scripts → **direct connection URL** (run from local/CI where supported)
+If you add direct Postgres connections from Vercel server functions, use Supabase pooler URLs.
+For this app, APIs already run through Next.js route handlers and the Supabase client SDK.
 
 ## Quick start
 
@@ -47,15 +36,14 @@ npm install
 cp .env.example .env.local
 ```
 
-Then fill in your Supabase URL + anon key.
+3. Fill env values:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-3. Create DB schema:
+4. Create DB schema:
 - Open Supabase SQL editor
 - Run `supabase/schema.sql`
-
-4. Configure Auth for username/password MVP:
-- Supabase Dashboard → Authentication → Providers → **Email** enabled
-- Authentication settings: disable **Confirm email** for local MVP (or implement proper email flow)
 
 5. Run locally:
 
@@ -63,26 +51,17 @@ Then fill in your Supabase URL + anon key.
 npm run dev
 ```
 
-6. Deploy:
-- Push to GitHub
-- Import repo in Vercel
-- Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` env vars
-- If you add server-side SQL access, also add the pooler-based `DATABASE_URL`
-
 ## MVP flows implemented
 
-- User signs up or logs in with username + password
-- Username is persisted in `profiles`
-- User can add another user by username
-- Add-friend input checks if username exists
-- Target user receives realtime notification when a friend request is inserted
-- Target user can accept incoming requests
-- Empty-state panel shown when user has no friends
+- Sign up with username + password
+- Log in with username + password
+- Password stored hashed in database
+- Session stored in `app_sessions` with secure HttpOnly cookie
+- Add friend by username with existence checks
+- Incoming friend request list with Accept action
+- Notification appears when a new request is detected
 
-## Next improvements (recommended)
+## Security note
 
-1. Show sender usernames (not IDs) for incoming requests.
-2. Add direct messages as a separate post-friend feature page.
-3. Add presence/online status via Realtime channels.
-4. Move write operations to Next.js server actions if you want stricter control.
-5. Add rate limiting and anti-spam moderation rules.
+Because auth/session logic is custom, all database writes happen server-side using `SUPABASE_SERVICE_ROLE_KEY`.
+Do not expose service role keys to the browser.
