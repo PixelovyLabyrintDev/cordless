@@ -1,0 +1,61 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #0f1221;
+  color: #f4f6ff;
+}
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+section {
+  border: 1px solid #273056;
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #161c36;
+}
+
+input,
+button,
+textarea {
+  background: #0f1221;
+  color: #f4f6ff;
+  border: 1px solid #374170;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+ul {
+  margin: 0.7rem 0 0;
+  padding-left: 1.1rem;
+}
+
+h1,
+h2,
+h3 {
+  margin-top: 0;
+}
+
+.message {
+  border-bottom: 1px solid #273056;
+  padding: 0.3rem 0;
+}
