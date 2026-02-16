@@ -74,6 +74,16 @@ export async function POST(request: Request) {
       );
     }
 
+    if (insertError.code === "23503") {
+      return NextResponse.json(
+        {
+          error:
+            "Friend request schema mismatch detected (foreign key). Re-run supabase/schema.sql to recreate tables with app_users foreign keys."
+        },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
       { error: `Could not send request: ${insertError.message}` },
       { status: 500 }

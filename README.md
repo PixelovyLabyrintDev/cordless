@@ -78,3 +78,6 @@ Check your `.env.local`, restart the dev server, and rerun the schema SQL.
   1. Ensure both users are logged in (valid `cordless_session` cookie).
   2. Open browser devtools network tab and inspect `/api/friends/request` and `/api/friends/list` responses.
   3. This app now returns detailed API errors for duplicate/race and list-query failures so the status text should explain the exact cause.
+
+- **`friend_requests_from_user_id_fkey` foreign key error**:
+  this means your existing `friend_requests` table still points to an older user table from a previous schema version. Re-run `supabase/schema.sql` (it now drops/recreates app auth tables + friend_requests for this MVP) and then create fresh test accounts.

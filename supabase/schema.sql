@@ -1,15 +1,21 @@
 -- Run this in Supabase SQL editor.
+-- NOTE: This script is destructive for auth/friend data in this dev MVP.
 
 create extension if not exists pgcrypto;
 
-create table if not exists public.app_users (
+-- Reset these tables so constraints always match the current username/password app auth model.
+drop table if exists public.friend_requests cascade;
+drop table if exists public.app_sessions cascade;
+drop table if exists public.app_users cascade;
+
+create table public.app_users (
   id uuid primary key default gen_random_uuid(),
   username text not null unique check (char_length(username) between 3 and 24),
   password_hash text not null,
   created_at timestamptz not null default timezone('utc', now())
 );
 
-create table if not exists public.app_sessions (
+create table public.app_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.app_users(id) on delete cascade,
   token_hash text not null unique,
@@ -17,7 +23,7 @@ create table if not exists public.app_sessions (
   created_at timestamptz not null default timezone('utc', now())
 );
 
-create table if not exists public.friend_requests (
+create table public.friend_requests (
   id uuid primary key default gen_random_uuid(),
   from_user_id uuid not null references public.app_users(id) on delete cascade,
   to_user_id uuid not null references public.app_users(id) on delete cascade,
