@@ -1,17 +1,18 @@
 # Cordless
 
 Cordless is a Discord-style MVP focused on:
-- simple direct text messaging
+- account auth (username + password)
 - adding people as friends
+- realtime friend request notifications
 - fast deployment to Vercel
 - Supabase as the backend (Auth + Postgres + Realtime)
 
 ## Why this architecture?
 
 Instead of running a custom websocket server (hard on serverless platforms), this setup uses:
-1. **Supabase Auth** for user identity
-2. **Supabase Postgres** for durable data
-3. **Supabase Realtime** for live messages
+1. **Supabase Auth** for user identity and password handling
+2. **Supabase Postgres** for durable social graph data
+3. **Supabase Realtime** for friend request notifications
 4. **Vercel** to host the Next.js app
 
 This is the easiest path to production with the tooling you already have.
@@ -52,9 +53,9 @@ Then fill in your Supabase URL + anon key.
 - Open Supabase SQL editor
 - Run `supabase/schema.sql`
 
-4. Enable Anonymous Sign-in:
-- Supabase Dashboard → Authentication → Providers
-- Turn on **Anonymous**
+4. Configure Auth for username/password MVP:
+- Supabase Dashboard → Authentication → Providers → **Email** enabled
+- Authentication settings: disable **Confirm email** for local MVP (or implement proper email flow)
 
 5. Run locally:
 
@@ -70,17 +71,18 @@ npm run dev
 
 ## MVP flows implemented
 
-- Anonymous session on first load
-- User chooses a unique handle (`profiles` table)
-- Send a friend request by handle (`friend_requests` table)
-- Send direct message by handle (`direct_messages` table)
-- Receive realtime message inserts via Supabase Realtime
+- User signs up or logs in with username + password
+- Username is persisted in `profiles`
+- User can add another user by username
+- Add-friend input checks if username exists
+- Target user receives realtime notification when a friend request is inserted
+- Target user can accept incoming requests
+- Empty-state panel shown when user has no friends
 
 ## Next improvements (recommended)
 
-1. Convert friend request list from raw JSON to polished cards.
-2. Add accept/decline actions for pending requests.
-3. Resolve sender/receiver IDs to handles in message list.
-4. Add conversation view grouped by friend.
-5. Move write operations to Next.js server actions if you want stricter control.
-6. Add rate limiting and anti-spam moderation rules.
+1. Show sender usernames (not IDs) for incoming requests.
+2. Add direct messages as a separate post-friend feature page.
+3. Add presence/online status via Realtime channels.
+4. Move write operations to Next.js server actions if you want stricter control.
+5. Add rate limiting and anti-spam moderation rules.

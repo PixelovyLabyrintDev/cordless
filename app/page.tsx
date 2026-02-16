@@ -1,41 +1,99 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { RealtimePostgresInsertPayload, User } from "@supabase/supabase-js";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  RealtimePostgresInsertPayload,
+  RealtimePostgresUpdatePayload,
+  User
+} from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 
 type Profile = {
   id: string;
-  handle: string;
+  username: string;
 };
 
-type Message = {
+type FriendRequest = {
   id: string;
-  sender_id: string;
-  receiver_id: string;
-  body: string;
+  from_user_id: string;
+  to_user_id: string;
+  status: "pending" | "accepted" | "blocked";
   created_at: string;
 };
+
+const usernameToEmail = (username: string) => `${username}@cordless.local`;
 
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [handleInput, setHandleInput] = useState("");
-  const [requestHandle, setRequestHandle] = useState("");
-  const [friendRequests, setFriendRequests] = useState<Array<Record<string, string>>>([]);
-  const [messageToHandle, setMessageToHandle] = useState("");
-  const [messageBody, setMessageBody] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [status, setStatus] = useState("Connecting...");
+
+  const [usernameInput, setUsernameInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
+
+  const [friendUsername, setFriendUsername] = useState("");
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+  const [incomingNotifications, setIncomingNotifications] = useState<string[]>([]);
+
+  const [usernamesById, setUsernamesById] = useState<Record<string, string>>({});
+  const [status, setStatus] = useState("Ready.");
 
   const myId = user?.id;
 
-  const knownHandles = useMemo(() => {
-    const handles = new Set<string>();
-    if (profile?.handle) handles.add(profile.handle);
-    if (messageToHandle) handles.add(messageToHandle);
-    return [...handles];
-  }, [profile?.handle, messageToHandle]);
+  const loadUsernames = useCallback(async (ids: string[]) => {
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    if (uniqueIds.length === 0) return;
+
+    const { data } = await supabase.from("profiles").select("id, username").in("id", uniqueIds);
+
+    if (!data) return;
+
+    const mapped = data.reduce<Record<string, string>>((acc, item) => {
+      acc[item.id] = item.username;
+      return acc;
+    }, {});
+
+    setUsernamesById((prev) => ({ ...prev, ...mapped }));
+  }, []);
+
+  const friendUsernames = useMemo(() => {
+    if (!myId) return [] as string[];
+
+    return friendRequests
+      .filter((request) => request.status === "accepted")
+      .map((request) => (request.from_user_id === myId ? request.to_user_id : request.from_user_id))
+      .map((friendId) => usernamesById[friendId] ?? friendId);
+  }, [friendRequests, myId, usernamesById]);
+
+  const pendingIncoming = useMemo(
+    () => friendRequests.filter((request) => request.to_user_id === myId && request.status === "pending"),
+    [friendRequests, myId]
+  );
+
+  const hydrateProfileAndRequests = useCallback(async (sessionUser: User) => {
+    const { data: existingProfile } = await supabase
+      .from("profiles")
+      .select("id, username")
+      .eq("id", sessionUser.id)
+      .maybeSingle();
+
+    setProfile(existingProfile ?? null);
+
+    const { data: requests } = await supabase
+      .from("friend_requests")
+      .select("id, from_user_id, to_user_id, status, created_at")
+      .or(`from_user_id.eq.${sessionUser.id},to_user_id.eq.${sessionUser.id}`)
+      .order("created_at", { ascending: false });
+
+    const typedRequests = (requests ?? []) as FriendRequest[];
+    setFriendRequests(typedRequests);
+
+    await loadUsernames([
+      sessionUser.id,
+      ...typedRequests.map((request) => request.from_user_id),
+      ...typedRequests.map((request) => request.to_user_id)
+    ]);
+  }, [loadUsernames]);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -43,66 +101,69 @@ export default function HomePage() {
         data: { session }
       } = await supabase.auth.getSession();
 
-      if (!session) {
-        const { data, error } = await supabase.auth.signInAnonymously();
-        if (error) {
-          setStatus(`Auth failed: ${error.message}`);
-          return;
-        }
-        setUser(data.user ?? null);
-      } else {
+      if (session?.user) {
         setUser(session.user);
+        await hydrateProfileAndRequests(session.user);
       }
     };
 
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        void hydrateProfileAndRequests(session.user);
+      } else {
+        setUser(null);
+        setProfile(null);
+        setFriendRequests([]);
+        setUsernamesById({});
+      }
+    });
+
     void bootstrap();
-  }, []);
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [hydrateProfileAndRequests]);
 
   useEffect(() => {
     if (!myId) return;
 
-    const loadInitial = async () => {
-      setStatus("Connected.");
-      const { data: existingProfile } = await supabase
-        .from("profiles")
-        .select("id, handle")
-        .eq("id", myId)
-        .maybeSingle();
-
-      if (existingProfile) {
-        setProfile(existingProfile);
-        setHandleInput(existingProfile.handle);
-      }
-
-      const { data: requestRows } = await supabase
-        .from("friend_requests")
-        .select("id, status, from_user:profiles!friend_requests_from_user_id_fkey(handle), to_user:profiles!friend_requests_to_user_id_fkey(handle)")
-        .or(`from_user_id.eq.${myId},to_user_id.eq.${myId}`)
-        .order("created_at", { ascending: false });
-
-      setFriendRequests((requestRows as Array<Record<string, string>>) ?? []);
-
-      const { data: messageRows } = await supabase
-        .from("direct_messages")
-        .select("id, sender_id, receiver_id, body, created_at")
-        .or(`sender_id.eq.${myId},receiver_id.eq.${myId}`)
-        .order("created_at", { ascending: false })
-        .limit(50);
-
-      setMessages((messageRows ?? []) as Message[]);
-    };
-
-    void loadInitial();
-
     const channel = supabase
-      .channel("cordless-live")
+      .channel(`friend-requests-${myId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "direct_messages" },
-        (payload: RealtimePostgresInsertPayload<Message>) => {
-          const row = payload.new;
-          if (row.sender_id === myId || row.receiver_id === myId) {
-            setMessages((prev) => [row, ...prev].slice(0, 50));
+        { event: "INSERT", schema: "public", table: "friend_requests" },
+        async (payload: RealtimePostgresInsertPayload<FriendRequest>) => {
+          const request = payload.new;
+
+          if (request.from_user_id === myId || request.to_user_id === myId) {
+            setFriendRequests((prev) => [request, ...prev]);
+          }
+
+          await loadUsernames([request.from_user_id, request.to_user_id]);
+
+          if (request.to_user_id === myId) {
+            const { data: sender } = await supabase
+              .from("profiles")
+              .select("username")
+              .eq("id", request.from_user_id)
+              .maybeSingle();
+
+            const senderUsername = sender?.username ?? "Someone";
+            setIncomingNotifications((prev) => [`${senderUsername} sent you a friend request.`, ...prev]);
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "friend_requests" },
+        (payload: RealtimePostgresUpdatePayload<FriendRequest>) => {
+          const request = payload.new;
+          if (request.from_user_id === myId || request.to_user_id === myId) {
+            setFriendRequests((prev) => prev.map((item) => (item.id === request.id ? request : item)));
           }
         }
       )
@@ -111,156 +172,238 @@ export default function HomePage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [myId]);
+  }, [loadUsernames, myId]);
 
-  const upsertProfile = async (e: FormEvent) => {
+  const submitAuth = async (e: FormEvent) => {
     e.preventDefault();
-    if (!myId || !handleInput.trim()) return;
 
-    const normalized = handleInput.trim().toLowerCase();
-    const { error } = await supabase.from("profiles").upsert({ id: myId, handle: normalized });
-
-    if (error) {
-      setStatus(`Could not save handle: ${error.message}`);
+    const normalizedUsername = usernameInput.trim().toLowerCase();
+    if (!normalizedUsername || !passwordInput.trim()) {
+      setStatus("Please enter both username and password.");
       return;
     }
 
-    setProfile({ id: myId, handle: normalized });
-    setStatus("Handle saved.");
+    if (normalizedUsername.length < 3) {
+      setStatus("Username must be at least 3 characters.");
+      return;
+    }
+
+    const email = usernameToEmail(normalizedUsername);
+
+    if (authMode === "signup") {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: passwordInput.trim()
+      });
+
+      if (error) {
+        setStatus(`Could not create account: ${error.message}`);
+        return;
+      }
+
+      if (data.user) {
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .upsert({ id: data.user.id, username: normalizedUsername });
+
+        if (profileError) {
+          setStatus(`Account created, but profile failed: ${profileError.message}`);
+          return;
+        }
+      }
+
+      setStatus("Account created. You are signed in.");
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password: passwordInput.trim()
+    });
+
+    if (error) {
+      setStatus(`Login failed: ${error.message}`);
+      return;
+    }
+
+    setStatus("Logged in.");
   };
 
   const sendFriendRequest = async (e: FormEvent) => {
     e.preventDefault();
-    if (!myId || !requestHandle.trim()) return;
 
-    const { data: target } = await supabase
-      .from("profiles")
-      .select("id, handle")
-      .eq("handle", requestHandle.trim().toLowerCase())
-      .maybeSingle();
+    if (!myId || !friendUsername.trim()) return;
 
-    if (!target) {
-      setStatus("No user found with that handle.");
+    const targetUsername = friendUsername.trim().toLowerCase();
+
+    if (targetUsername === profile?.username) {
+      setStatus("You cannot add yourself.");
       return;
     }
 
-    const { error } = await supabase
+    const { data: targetProfile } = await supabase
+      .from("profiles")
+      .select("id, username")
+      .eq("username", targetUsername)
+      .maybeSingle();
+
+    if (!targetProfile) {
+      setStatus("That username does not exist.");
+      return;
+    }
+
+    const { data: existing } = await supabase
       .from("friend_requests")
-      .insert({ from_user_id: myId, to_user_id: target.id, status: "pending" });
+      .select("id")
+      .or(
+        `and(from_user_id.eq.${myId},to_user_id.eq.${targetProfile.id}),and(from_user_id.eq.${targetProfile.id},to_user_id.eq.${myId})`
+      )
+      .maybeSingle();
+
+    if (existing) {
+      setStatus("A friend relationship or request already exists with this user.");
+      return;
+    }
+
+    const { error } = await supabase.from("friend_requests").insert({
+      from_user_id: myId,
+      to_user_id: targetProfile.id,
+      status: "pending"
+    });
 
     if (error) {
-      setStatus(`Could not send request: ${error.message}`);
+      setStatus(`Could not send friend request: ${error.message}`);
       return;
     }
 
     setStatus("Friend request sent.");
+    setFriendUsername("");
   };
 
-  const sendMessage = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!myId || !messageBody.trim() || !messageToHandle.trim()) return;
-
-    const { data: target } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("handle", messageToHandle.trim().toLowerCase())
-      .maybeSingle();
-
-    if (!target) {
-      setStatus("Recipient handle not found.");
-      return;
-    }
-
-    const { error } = await supabase.from("direct_messages").insert({
-      sender_id: myId,
-      receiver_id: target.id,
-      body: messageBody.trim()
-    });
+  const acceptRequest = async (requestId: string) => {
+    const { error } = await supabase
+      .from("friend_requests")
+      .update({ status: "accepted" })
+      .eq("id", requestId);
 
     if (error) {
-      setStatus(`Could not send message: ${error.message}`);
+      setStatus(`Could not accept request: ${error.message}`);
       return;
     }
 
-    setMessageBody("");
-    setStatus("Message sent.");
+    setStatus("Friend request accepted.");
   };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setStatus("Signed out.");
+  };
+
+  if (!user || !profile) {
+    return (
+      <main>
+        <section className="card auth-card">
+          <h1>Cordless</h1>
+          <p>Create an account or sign in with username + password.</p>
+
+          <div className="row">
+            <button type="button" onClick={() => setAuthMode("signup")} data-active={authMode === "signup"}>
+              Sign up
+            </button>
+            <button type="button" onClick={() => setAuthMode("login")} data-active={authMode === "login"}>
+              Log in
+            </button>
+          </div>
+
+          <form onSubmit={submitAuth} className="stack">
+            <input
+              value={usernameInput}
+              onChange={(e) => setUsernameInput(e.target.value)}
+              placeholder="username"
+              autoComplete="username"
+            />
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              placeholder="password"
+              autoComplete={authMode === "signup" ? "new-password" : "current-password"}
+            />
+            <button type="submit">{authMode === "signup" ? "Create account" : "Log in"}</button>
+          </form>
+
+          <p>Status: {status}</p>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main>
-      <h1>Cordless MVP</h1>
-      <p>
-        A first pass at a Discord-like app on Supabase + Vercel. This uses anonymous auth,
-        profiles, friend requests, and realtime direct messages.
-      </p>
-      <p>Status: {status}</p>
-
-      <section>
-        <h2>1) Your identity</h2>
-        <form onSubmit={upsertProfile} className="row">
-          <input
-            value={handleInput}
-            onChange={(e) => setHandleInput(e.target.value)}
-            placeholder="pick-handle"
-          />
-          <button type="submit">Save handle</button>
-        </form>
-        {profile ? <p>Signed in as: <strong>{profile.handle}</strong></p> : <p>No handle yet.</p>}
+      <section className="card">
+        <div className="row between">
+          <div>
+            <h1>Cordless</h1>
+            <p>
+              Signed in as <strong>{profile.username}</strong>.
+            </p>
+          </div>
+          <button type="button" onClick={signOut}>
+            Sign out
+          </button>
+        </div>
+        <p>Status: {status}</p>
       </section>
 
-      <section>
-        <h2>2) Add friends</h2>
+      {incomingNotifications.length > 0 && (
+        <section className="card">
+          <h2>Notifications</h2>
+          <ul>
+            {incomingNotifications.map((item, idx) => (
+              <li key={`${item}-${idx}`}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="card">
+        <h2>Friends</h2>
+        {friendUsernames.length === 0 ? (
+          <p>You have no friends yet. Add someone below.</p>
+        ) : (
+          <ul>
+            {friendUsernames.map((friend) => (
+              <li key={friend}>{friend}</li>
+            ))}
+          </ul>
+        )}
+
         <form onSubmit={sendFriendRequest} className="row">
           <input
-            value={requestHandle}
-            onChange={(e) => setRequestHandle(e.target.value)}
-            placeholder="friend handle"
+            value={friendUsername}
+            onChange={(e) => setFriendUsername(e.target.value)}
+            placeholder="friend username"
           />
-          <button type="submit">Send request</button>
+          <button type="submit">Add friend</button>
         </form>
-        <ul>
-          {friendRequests.map((req, idx) => (
-            <li key={`${req.id ?? idx}`}>
-              {JSON.stringify(req)}
-            </li>
-          ))}
-        </ul>
       </section>
 
-      <section>
-        <h2>3) Direct messages</h2>
-        <form onSubmit={sendMessage}>
-          <div className="row">
-            <input
-              value={messageToHandle}
-              onChange={(e) => setMessageToHandle(e.target.value)}
-              placeholder="recipient handle"
-            />
-            <input
-              value={messageBody}
-              onChange={(e) => setMessageBody(e.target.value)}
-              placeholder="say something"
-            />
-            <button type="submit">Send</button>
-          </div>
-        </form>
-
-        <h3>Recent messages</h3>
-        <div>
-          {messages.map((msg) => (
-            <div className="message" key={msg.id}>
-              <div>
-                <strong>{msg.sender_id === myId ? "You" : msg.sender_id}</strong> → {msg.receiver_id === myId ? "You" : msg.receiver_id}
-              </div>
-              <div>{msg.body}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h2>Known handles (local)</h2>
-        <p>{knownHandles.join(", ") || "None yet"}</p>
+      <section className="card">
+        <h2>Incoming friend requests</h2>
+        {pendingIncoming.length === 0 ? (
+          <p>No pending requests.</p>
+        ) : (
+          <ul>
+            {pendingIncoming.map((request) => (
+              <li key={request.id} className="row between">
+                <span>{usernamesById[request.from_user_id] ?? request.from_user_id}</span>
+                <button type="button" onClick={() => acceptRequest(request.id)}>
+                  Accept
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </main>
   );

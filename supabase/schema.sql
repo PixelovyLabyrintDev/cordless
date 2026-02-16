@@ -4,7 +4,7 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  handle text not null unique check (char_length(handle) between 3 and 24),
+  username text not null unique check (char_length(username) between 3 and 24),
   created_at timestamptz not null default timezone('utc', now())
 );
 
@@ -79,4 +79,5 @@ create policy "Send message as self"
   to authenticated
   with check (auth.uid() = sender_id);
 
+alter publication supabase_realtime add table public.friend_requests;
 alter publication supabase_realtime add table public.direct_messages;
