@@ -73,3 +73,8 @@ Do not expose service role keys to the browser.
   2. You have not executed `supabase/schema.sql` (missing `app_users`/`app_sessions`).
 
 Check your `.env.local`, restart the dev server, and rerun the schema SQL.
+
+- **Friend request is inserted in DB but UI says send failed / receiver sees nothing**:
+  1. Ensure both users are logged in (valid `cordless_session` cookie).
+  2. Open browser devtools network tab and inspect `/api/friends/request` and `/api/friends/list` responses.
+  3. This app now returns detailed API errors for duplicate/race and list-query failures so the status text should explain the exact cause.

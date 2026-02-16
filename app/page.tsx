@@ -32,22 +32,31 @@ export default function HomePage() {
 
   const refreshDashboard = async () => {
     const response = await fetch("/api/friends/list", { cache: "no-store" });
+    const data = (await response.json().catch(() => ({}))) as
+      | DashboardData
+      | { error?: string };
+
     if (!response.ok) {
       if (response.status === 401) {
         setMe(null);
         setFriends([]);
         setIncomingPending([]);
+      } else if ("error" in data && data.error) {
+        setStatus(data.error);
+      } else {
+        setStatus(`Could not refresh dashboard (${response.status}).`);
       }
       return;
     }
 
-    const data = (await response.json()) as DashboardData;
-    setMe(data.me);
-    setFriends(data.friends ?? []);
-    setIncomingPending(data.incomingPending ?? []);
+    const dashboard = data as DashboardData;
 
-    if ((data.incomingPending?.length ?? 0) > prevIncomingCount.current) {
-      const newest = data.incomingPending[0];
+    setMe(dashboard.me);
+    setFriends(dashboard.friends ?? []);
+    setIncomingPending(dashboard.incomingPending ?? []);
+
+    if ((dashboard.incomingPending?.length ?? 0) > prevIncomingCount.current) {
+      const newest = dashboard.incomingPending[0];
       if (newest) {
         setNotifications((prev) => [
           `${newest.from_username} sent you a friend request.`,
@@ -56,7 +65,7 @@ export default function HomePage() {
       }
     }
 
-    prevIncomingCount.current = data.incomingPending?.length ?? 0;
+    prevIncomingCount.current = dashboard.incomingPending?.length ?? 0;
   };
 
   useEffect(() => {
@@ -130,10 +139,16 @@ export default function HomePage() {
       body: JSON.stringify({ username: target })
     });
 
-    const data = await response.json();
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      alreadyExists?: boolean;
+    };
 
     if (!response.ok) {
-      setStatus(data.error ?? "Could not send request.");
+      setStatus(data.error ?? `Could not send request (${response.status}).`);
+      if (response.status === 409) {
+        await refreshDashboard();
+      }
       return;
     }
 
