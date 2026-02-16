@@ -16,6 +16,22 @@ Instead of running a custom websocket server (hard on serverless platforms), thi
 
 This is the easiest path to production with the tooling you already have.
 
+## Vercel + Supabase networking (IPv4 question)
+
+Short answer: **yes, if you need a Postgres connection from Vercel, use Supabase's pooler connection string**.
+
+- For this current MVP, the app talks to Supabase via `@supabase/supabase-js` (HTTP/WebSocket APIs), so you usually do **not** need a raw Postgres connection from Vercel.
+- If you later add a server-side DB client (Prisma, Drizzle, `pg`, migrations, cron jobs), use Supabase's **Supavisor pooler** connection strings from the project dashboard.
+
+### Which pooler mode should I use?
+
+- **Transaction pooler**: best default for serverless runtime queries (many short-lived requests).
+- **Session pooler**: use when your library/tool needs session-level behavior (some ORMs or long-lived operations).
+
+A practical setup is:
+- runtime app queries on Vercel → **pooler URL**
+- migrations/admin scripts → **direct connection URL** (run from local/CI where supported)
+
 ## Quick start
 
 1. Install dependencies:
@@ -50,6 +66,7 @@ npm run dev
 - Push to GitHub
 - Import repo in Vercel
 - Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` env vars
+- If you add server-side SQL access, also add the pooler-based `DATABASE_URL`
 
 ## MVP flows implemented
 
