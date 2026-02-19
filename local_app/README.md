@@ -12,8 +12,8 @@ python local_app/main.py
 
 - Static UI prototype only (no networking/audio yet)
 - Includes:
-  - Server connection bar
-  - Server/channel/user tree
+  - Server/channel tree (no placeholder users)
+  - Channel-linked chat panel (chat updates when selected channel changes)
   - Voice activity log panel
-  - Channel chat panel
+  - Host mode toggle for users who have forwarded required ports
   - Basic control buttons (mute/deafen/settings)
